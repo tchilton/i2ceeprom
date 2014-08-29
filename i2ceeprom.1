@@ -1,0 +1,223 @@
+.\"
+.\" i2ceeprom - An I2C EEPROM manipulation utility
+.\" Copyright (C) 2014 Tim Chilton
+.\"
+.\" This program is free software; you can redistribute it and/or modify
+.\" it under the terms of the GNU General Public License as published by
+.\" the Free Software Foundation; either version 2 of the License, or
+.\" (at your option) any later version.
+.\"
+.\" This program is distributed in the hope that it will be useful,
+.\" but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\" MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\" GNU General Public License for more details.
+.\"
+.\" You should have received a copy of the GNU General Public License
+.\" along with this program. If not, see <http://www.gnu.org/licenses/>.
+.\"
+.\"
+.\" $Id$
+.\"
+.Dd DATE August 28, 2014
+.Os
+.Dt I2CEEPROM 1
+.Sh NAME
+.Nm i2ceeprom
+.Nd An I2C EEPROM manipulation utility
+.Sh SYNOPSIS
+.Nm
+.Ar i2c-bus
+.Ar device-id
+.Op Fl h 
+.Op Fl p Ar page-size
+.Op Fl s Ar device-size
+.Op Fl f Ar pattern
+.Op Fl d
+.Op Fl b
+.Op Fl w
+.Op Fl r 
+.Op Fl v
+.Op Fl n Ar file
+.Sh DESCRIPTION
+.Nm i2ceeprom
+is a program for programming, reading, testing and verifying I2C EEPROM devices.
+.Nm i2ceeprom
+manipulates any I2C EEPROM device that is exposed through the /dev/i2c-x subsystem.
+it has been tested on a Raspberry Pi and with 24xx series EEPROM devices from
+Microchip and Atmel 
+.Pp
+Devices can be detected by probing the I2C bus using 
+.Em i2cdetect
+or by looking at the circuit diagram and device data sheet
+.Pp
+It is possible to edit a device's contents by performing a read to a file, converting the file to ASCII format with
+.Em xxd
+editing the resulting file, then converting the ASCII file back to binary with
+.Em xxd -r
+then writing that file back using 
+.Em i2ceeprom
+
+.Sh OPTIONS
+The first two arguments are mandatory, they are
+.Bl -tag -offset indent -width indent
+.It Ar i2c-bus
+The I2C bus that will be used - as determined by
+.Em i2cdetect -l 
+.It Ar i2c-addr
+The I2C address of the target device (determine this from an
+.Em i2cdetect -y n
+(where n is the i2c-bus number), or from the devices data sheet.
+.El
+.Pp
+The following optional command line options are supported
+.Bl -tag -offset indent -width indent
+.It Ar -h
+Display help information
+.It Ar -p page-size
+Define the page size of the target device. Obtain this from the devices data sheet (look at the page write section). Using the correct page size may reduce wear on the EEPROM and will improve throughput. The default page size is 32 bytes. The maximum is 128 bytes.
+Setting a page size larger than the device supports will result in write failures or verify errors.
+.It Ar -s device-size
+Define the size of the target device. Obtain this from the devices data sheet. Note that devices larger than 64K are often presented on multiple I2C addresses.
+.Pp
+As an example, the Microchip 24LC1025, which is a 128Kx8 device presents 64K on one the configured address and another 64K on address+4, i.e. 0x50 and 0x55, or 0x51 and 0x56
+.It Ar -r
+Read the device and write its contents to the specified file. The use of this option implies that the filename
+.Em -n 
+must also be used
+.It Ar -w
+Write the device conents using the contents of the specified file. The use of this option implies that the filename 
+.Em -n 
+must also be used
+.It Ar -v
+Verify the memory buffer to the device contents,
+The filename (-n) argument must be specified for any read, write or verify operation, but it can be omitted for any patern based operation (where there is no file)
+
+.It Ar -n name
+The name of the file to be used in the read, write or verify operation. For write or verify operations, only the first device-size of the file is used. If the file is smaller than device-size, then the remainder of the EEPROM will be filled with 0x00
+.It Ar -p pattern
+The pattern to be programmed into the device, valid pattern codes are :
+.Pp
+0 - All Zero's (0x00)
+.Pp
+1 - All One's  (0xFF)
+.Pp
+3 - Incremental pattern with +3 offset on each 0x0100 boundary This is a good test for missing pages in a memory device, since each page has different contents. Works best with the -v (verify) option
+.Pp
+5 - Alternating zero, one pattern - b01010101  (0x55)
+.Pp
+a - Alternating one, zero pattern - b10101010  (0xaa)
+.Pp
+Performing all the above pattern writes with verify gives a quick check of the EEPROM, since all functionality is tested - read, write, I2C bus, mememory array.
+.It Ar -d
+Hex Dump the devices contents to stdout. This removes the need to read the device to a file, then hexdump it separately, it does not however have some of the more advanced features of hexdump such as consolidating identical lines.
+.El
+
+.Sh LIMITATIONS
+.Pp
+There are a couple of limitations, that exist due to technology of the EEPROM's or to simplify the utility and reduce the risk of accidental data corruption.
+.Pp
+1.  It is not possible to perform multiple consecutive operations from one invocation of the utility, for example you cannot perform all pattern tests in one go, however you can run the utility multiple times with different arguments via a simple script.
+.Pp
+2. Devices that appear on multiple I2C addresses (i.e. EEPROM's larger than 64K) must be handled as if they were physicaly separate devices. This has the benefit of reducing the write operations to only one range, hence extending the devices lifespan.
+.Pp
+3. Due to (2), this in turn means that different image files must be used as no offset read / write capabilities to read part of an image have been coded, since this would increase the risk of command line errors corrupting the image file or EEPROM. This is trivial to overcome by the use of 
+.Xr dd 1
+with the block size (bs) seek (output) and skip (input) options
+.Pp
+4. If this application is used on an I2C bus with other I2C master devices, then they may be using the bus whilst we are performing transfers, depending on how busy the bus is, this may result in transient read / write errors. The application will retry if errors occur. The impact on other masters on the bus due to the bus being busier may vary depending on how resilient they are - ie other i2c applications may fail whilst using this tool. 
+.Pp
+Similarly, if another master is trying to talk to the same device we are, then incorrect memory addresses may be accessed. This tool always sends the desired address imediately before performing a read / write. As above, the impact on other master devices due to this functionality is unknown.
+
+Whenever possible, it is prefereable to temporarily stop other I2C masters to reduce the above risks
+
+.Sh WARNING
+This program will talk to I2C devices and may write to EEPROM or other devices that use the same protocol, hence it can cause data loss if not used correctly.
+.Pp
+For example, it would be inadvisable to reprogram the I2C EEPROM's on your DRAM
+modules or to program devices without first understanding what they do and taking a backup of their contents.
+See the -r option
+If you connect a device (such as a Raspberry Pi) to an existing I2C bus, then ensure that the voltage levels match (use a BSS138 level shifter or similar) and ensure that there is nothing on the same address that the master device takes.
+.Pp
+If you are creating your own interface and use a level shifter, don't forget to put 3.3K pull-up resistors on the SDA and SCL lines to the target supply. Read up on how I2C if you are not sure.
+.Pp
+Read the limitations section of this document 
+.Sh FILES
+.Bl -tag -offset indent -width /dev/i2c-x
+.It Pa /dev/i2c-x
+Device corresponding to the I2C bus that the device can be found on
+use 
+.Em i2cdetect -l
+or 
+.Em ls /dev/i2c*
+to find the busses in your system
+.El
+
+.Sh EXAMPLES
+.Em i2ceeprom 1 0x50 -s 8 -r -n image.bin
+.Pp
+Read the 8K EEPROM at address 0x50 on I2C bus 1, its contents will be placed in image.bin
+.Pp
+.Em i2ceeprom 1 0x50 -s 8 -w -n image.bin -v
+.Pp
+Write the 8K EEPROM at address 0x50 on I2C bus 1,
+Read the file called image.bin (first 8K only). Verify the device contents after writing.
+.Pp
+.Em i2ceeprom 1 0x50 -s 64 -p 128 -f 0 -v
+.Pp
+Fill (write) the 64K EEPROM at address 0x50 on I2C bus 1 with all Zero's, verify the device contents after writing
+.Pp
+.Em i2ceeprom 1 0x50 -s 32 -p 128 -d    
+.Pp
+Read the 32K EEPROM and dump its contents out to stdout in hexdump format. You can achieve the same result with a read to a file and a hexdump of the file.
+
+.Sh DIAGNOSTICS
+.Bd 
+.Pp
+If the device cannot be maniuplated, ensure that it is not managed by the OS by performing an 
+.Em i2cdetect -y n 
+on the i2c bus and ensure that the device is not shown as UU, which indicates that its unavailable for direct manipulation.
+.Pp
+There can be problems on shared I2C busses where the device, or other devices are being manipulated.
+.Em i2ceeprom
+attempts to work around such issues but cannot guarantee to get bus time on busy I2C busses. Smaller page sizes result in smaller I2C data transfers and may therefore help, but at the expense of slower operation.
+
+.Sh SEE ALSO
+.Xr i2cdetect 8 ,
+.Xr i2cset 8 ,
+.Xr i2cget 8 ,
+.Xr i2cdump 8 ,
+.Xr xxd 1 ,
+.Xr hexdump 1
+.Pp
+The manufacturers data sheet for the EEPROM you want to manipulate, specifically the default I2C addresses / address ranges, the page size, device size and how >64K devices are presented.
+
+.Sh HISTORY
+.Nm i2ceeprom
+was conceived when it was found that 
+.Xr i2cset 8 ,
+.Xr i2cget 8 ,
+.Xr i2cdump 8
+did not do what I expected and I needed a way to read and write I2C EEPROM's for an automation project I was working on.
+.Pp
+I have released this in the hope that it is useful to someone else, after all I have had more than my fair share of benefit from other people's open source software.
+
+.Sh AUTHORS
+.Nm i2ceeprom
+was written by Tim Chilton <tchilton@users.noreply.github.com>.
+.Sh BUGS
+As far as I know, there are none, but please report any you find via.
+.Dl "https://github.com/tchilton/i2ceeprom/issues" 
+
+.Sh COPYRIGHT
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+.Pp
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+.Pp
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <http://www.gnu.org/licenses/>.
