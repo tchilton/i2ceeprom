@@ -15,7 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-// Version 0.1 29/08/2014
+// Version 0.1 29/08/2014 Initial release
+// Version 0.1 30/08/2014 Improved patterns, removed global variables, added write enable flag
 
 // Note that on a shared I2C bus, other controllers may be addressing the 
 // same device, so always reset the address pointers before any data 
@@ -38,20 +39,20 @@
 
 // Function prototypes
 int     pollReady(int fh);
-int     writeTo(int fh, int address, char * buf, int iolen);
+int     writeTo(int fh, int address, char * buf, int pageSize);
 int		readFrom(int fh, int address, char * buf, int iolen);
 int		gotoAddress(int fh, int address);
 void    usage(void);
 int     checkValid(int size);
 int     myatoi(const char *str);
 int     hexDump(char * membuf, int size);
-void    readDevice(int fh, char * membuf, int memSize);
-void    writeDevice(int fh, char * membuf, int memSize);
-int     verifyToBuffer(int fh, char * membuf);
+void    readDevice(int fh, char * membuf, int memSize, int pageSize);
+void    writeDevice(int fh, char * membuf, int memSize, int pageSize);
+int     verifyToBuffer(int fh, char * membuf, int memSize, int pageSize);
 void    readFileToBuffer(char * membuf, char * filename, int memSize);
 void    writeFileFromBuffer(char * membuf, char * filename, int memSize);
-int     openDevice(int bus, int device); 
-void    fillBuffer(char * membuf, int pattern);
+int     openDevice(int bus, int device, int pageSize, int sizek); 
+void    fillBuffer(char * membuf, int pattern,int memSize, int pageSize);
 
 // Constants
 #define MAXFILEPATH 250         // Maximum file name length
@@ -59,23 +60,23 @@ void    fillBuffer(char * membuf, int pattern);
 // Compile with this in for more verbose output
 //#define DEBUGGING 1
 
-// Globals
-int	pageSize    = 32;		    // Number of bytes max for a page write
-int sizek       = 4;            // Default device size in Kb
-int	memSize;                   	// Size of the device in bytes
 
 int main(int argc, char * argv[]) {
     char    filename[MAXFILEPATH] = { '\0' }; 
-    int     busaddr = 1;            // I2C bus address
-    int     i2caddr = 0x51;			// The I2C address of the device - EEPROM
+    int     busaddr     = 1;        // I2C bus address
+    int     i2caddr     = 0x51;		// The I2C address of the device - EEPROM
+    int	    pageSize    = 32;       // Number of bytes max for a page write
+    int     sizek       = 4;        // Default device size in Kb
+    int	    memSize;              	// Size of the device in bytes
     int     check;  
     int     i;
 	int     fhand;					// Filename of the I2C device
-    int     doFill=0;               // True if we are filling memory
-    int     doRead=0;               // True if we are reading the device
-    int     doWrite=0;              // True if we are writing the memory 
-    int     doHexDump=0;            // True if we are hexdumping the memory to stdout
-    int     doVerify=0;             // True if we are verifying a read/write operation
+    int     doFill      = 0;        // True if we are filling memory
+    int     doRead      = 0;        // True if we are reading the device
+    int     doWrite     = 0;        // True if we are writing the memory 
+    int     doHexDump   = 0;        // True if we are hexdumping the memory to stdout
+    int     doVerify    = 0;        // True if we are verifying a read/write operation
+    int     writeEnable = 0;        // True if the -y flag has been set to enable writes
     int     pattern;                // The fill pattern
     char    * membuf;               // Memory buffer 
 
@@ -115,6 +116,10 @@ int main(int argc, char * argv[]) {
                     }
 					break;
 
+				case 'y':              // Writes are enabled
+                    writeEnable = 1;
+					break;
+
 				case 'v':              // Do a verify after any operation
                     doVerify = 1;
 					break;
@@ -122,27 +127,27 @@ int main(int argc, char * argv[]) {
 				case 'f':              // Fill device with pattern
                     if (++i >= argc) { usage(); }
                     switch (argv[i][0]){
-                        case '0':
+                        case '0':               // All Zero's
                             pattern=0x00;
                             doFill=1;
                             break;
 
-                        case '1':
+                        case '1':               // All One's
                             pattern=0xff;
                             doFill=1;
                             break;
 
-                        case '3':
+                        case '3':               // Incremental +3
                             pattern=-1;
                             doFill=1;
                             break;
 
-                        case '5':
+                        case 'c':               // Checkboard
                             pattern=0x55;
                             doFill=1;
                             break;
 
-                        case 'a':
+                        case 'd':               // Inverse Checkerboard
                             pattern=0xaa;
                             doFill=1;
                             break;
@@ -206,6 +211,13 @@ int main(int argc, char * argv[]) {
         exit(1);
     }
     
+    // Check we are write enabled for any write operation
+    if ((doWrite || doFill) && !writeEnable) {
+        printf("Write operation selected, but writes are not enabled\n");
+        printf("You must specify -y to enable writes\n");
+        exit(1);
+    }
+
     if (doFill) {       // Fill can do a verify without a filename
     } else if ((doRead || doWrite || doVerify) && (strlen(filename) == 0)) {
         printf("Filename not specified\n");
@@ -214,7 +226,7 @@ int main(int argc, char * argv[]) {
 
 
     // Do the work
-    fhand = openDevice(busaddr,i2caddr);     // Open the device
+    fhand = openDevice(busaddr,i2caddr,pageSize, sizek); // Open the device
 
 	if (!(membuf= (char *) malloc(memSize+pageSize))) {  // Create the memory buffer
 		printf("Malloc failed !");
@@ -222,30 +234,30 @@ int main(int argc, char * argv[]) {
 	}
 
     if (doFill) {                           // Fill the device with a pattern
-        fillBuffer(membuf,pattern);
-        writeDevice(fhand,membuf, memSize);
+        fillBuffer(membuf,pattern, memSize, pageSize);
+        writeDevice(fhand, membuf, memSize, pageSize);
     }
 
     if (doWrite) {                          // Write the file to the EEPROM
         readFileToBuffer(membuf,filename, memSize);
-        writeDevice(fhand,membuf, memSize);
+        writeDevice(fhand, membuf, memSize, pageSize);
     }
 
     if (doRead) {                           // Read the EEPROM to the file
-        readDevice(fhand,membuf,memSize);
+        readDevice(fhand,membuf,memSize, pageSize);
         writeFileFromBuffer(membuf, filename, memSize);
     }
 
     if (doVerify) {                         // Verify the EEPROM to the memory buffer
         if (!doFill && (!(doRead || doWrite) && doVerify)) {// Fill memory buffer if necessary
-            readFileToBuffer(membuf,filename, memSize);
+            readFileToBuffer(membuf, filename, memSize);
         }
-        verifyToBuffer(fhand,membuf);
+        verifyToBuffer(fhand, membuf, memSize, pageSize);
     }
 
     if (doHexDump) {                        // Hexdump the device out 
         printf("EEPROM contents\n\n");
-        readDevice(fhand,membuf,memSize);
+        readDevice(fhand, membuf, memSize, pageSize);
         hexDump(membuf, memSize);          
     }
 
@@ -260,9 +272,7 @@ int main(int argc, char * argv[]) {
 
 
 // Fill the device with the standard patterns
-// The incremental pattern fills with an increasing value but offsets by +3 on 
-// each 0x0100, this makes it possible to detect dead pages in a device
-void fillBuffer(char * membuf, int pattern) {
+void fillBuffer(char * membuf, int pattern, int memSize, int pageSize) {
     int     chunk;
     int     lp;
     char    * bptr;
@@ -270,6 +280,8 @@ void fillBuffer(char * membuf, int pattern) {
     bptr = membuf;
 
     printf("Preparing pattern ");
+    // The incremental pattern fills with an increasing value but offsets by +3 on 
+    // each 0x0100, this makes it possible to detect dead pages in a device
     if (pattern == -1) {                        // Incremental pattern
         printf("(Increment)\n");
         for (chunk = 0 ; chunk < (memSize / 256) ; chunk++) {
@@ -277,8 +289,21 @@ void fillBuffer(char * membuf, int pattern) {
                 *bptr++ = lp + (chunk * 3);     // Add 3 on each page       
             }
         }
-	} else {
-        printf("(0x%02x)\n",pattern);           // Fill of same value
+    // These patterns write a checkerboard (chess board) across the devices array
+    // It assumes that the device's internal geometry is based around the page size
+	} else if (pattern == 0x55 || pattern == 0xaa) {    // Checkerboard / inverse 
+        if (pattern == 0x55) {  printf("(Checkerboard)\n");         }
+        else {                  printf("(Inverse checkerboard)\n"); }
+        for (chunk = 0 ; chunk < (memSize / pageSize) ; chunk++) {
+            for(lp = 0 ; lp < pageSize; lp++) {		   
+                *bptr++ = pattern; 
+                pattern = ~pattern;             // Invert the pattern across each cell
+            }
+            pattern = ~pattern;                 // Invert the pattern on each page boundary
+        }
+    // Fills of static value - to detect single cell failures
+    } else {                                    // Fill of same value
+        printf("(0x%02x)\n",pattern);           
         for (lp = 0 ; lp <= memSize ; lp++) {
             *bptr++ = pattern;
         }
@@ -339,12 +364,12 @@ void writeFileFromBuffer(char * membuf, char * filename, int memSize) {
     printf("Writing %s\n",filename);
     if (!(fp=fopen(filename,"wb"))) {
         printf("Unable to create %s\n",filename);
-        exit(1);
+        exit(10);
     }
 
     if (!(fwrite(membuf,memSize,1,fp))) {
         printf("Write failed\n");
-        exit(1);
+        exit(10);
     }
 
     fclose(fp);
@@ -358,7 +383,7 @@ void readFileToBuffer(char * membuf, char * filename, int memSize) {
     printf("Reading %s\n",filename);
     if (!(fp=fopen(filename,"rb"))) {
         printf("Unable to read %s\n",filename);
-        exit(1);
+        exit(11);
     }
 
     if (fread(membuf,memSize,1,fp) != 1) {
@@ -366,7 +391,7 @@ void readFileToBuffer(char * membuf, char * filename, int memSize) {
             printf("Warning : file smaller than EEPROM (Remainder filled with 0x00)\n");
         } else {
             printf("Read failed\n");
-            exit (1);
+            exit(11);
         }
     }
 
@@ -375,7 +400,7 @@ void readFileToBuffer(char * membuf, char * filename, int memSize) {
 
 
 // Verify the device to the buffer
-int verifyToBuffer(int fh, char * membuf){
+int verifyToBuffer(int fh, char * membuf, int memSize, int pageSize){
     int         address=0;              
     char        *vbuf;
     char        *vbp;
@@ -387,7 +412,7 @@ int verifyToBuffer(int fh, char * membuf){
 
 	if (!(vbuf= (char *) malloc(pageSize+1))) {         // Create the memory buffer
 		printf("Malloc failed !");
-		exit(1);
+		exit(2);
 	}
     vbp = vbuf;
 
@@ -399,7 +424,7 @@ int verifyToBuffer(int fh, char * membuf){
 
         if (readFrom(fh, address, vbp, pageSize)) {               // Read from the memory
             printf("Read from device failed\n");
-            return (1);
+            return (22);
         }
 
 
@@ -422,14 +447,15 @@ int verifyToBuffer(int fh, char * membuf){
     free(vbuf);
     if (errors) {
         printf("\nVerify failed\n");
+        exit(23);
     } else {
         printf("\nVerify OK\n");
+        return(0);
     }
-    return(errors);
 }
 
 // Read the device into the buffer
-void readDevice(int fh, char * membuf, int memSize){
+void readDevice(int fh, char * membuf, int memSize, int pageSize){
     int         address=0;              
     char        *bp;
 
@@ -441,7 +467,7 @@ void readDevice(int fh, char * membuf, int memSize){
     while (address < memSize) {
         if (readFrom(fh, address, bp, pageSize)) {               // Read from the memory
             printf("Read from device failed\n");
-            exit(1);
+            exit(22);
         }
 
         address+=pageSize;
@@ -453,7 +479,7 @@ void readDevice(int fh, char * membuf, int memSize){
 }
 
 // Write the device from the buffer
-void writeDevice(int fh, char * membuf, int memSize){
+void writeDevice(int fh, char * membuf, int memSize, int pageSize){
     int         address=0;               
     char        *bp;
     bp=membuf;
@@ -473,7 +499,7 @@ void writeDevice(int fh, char * membuf, int memSize){
 
 
 // Open the connection to the device
-int openDevice(int bus, int device) {
+int openDevice(int bus, int device, int pageSize, int sizek) {
     char    filename[20];
     int     fh;
 
@@ -484,13 +510,13 @@ int openDevice(int bus, int device) {
     if ((fh = open(filename,O_RDWR)) < 0) {
         printf("Failed to open the bus.\n");
         /* ERROR HANDLING; you can check errno to see what went wrong */
-        exit(1);
+        exit(20);
     }
 
     if (ioctl(fh, I2C_SLAVE, device) < 0) {
         printf("Failed to acquire bus access and/or talk to slave.\n");
         /* ERROR HANDLING; you can check errno to see what went wrong */
-        exit(1);
+        exit(20);
     }
     return (fh);
 }
@@ -525,10 +551,10 @@ int gotoAddress(int fh, int address) {
 // Ensure that we do not exceed the maximum page size of the device
 // Since the I2C bus is a shared resource, we may fail to read if another device is 
 // doing someething (including talking to our chip !)
-int writeTo(int fh, int address, char * buf, int iolen) {
+int writeTo(int fh, int address, char * buf, int pageSize) {
     char            * bp;
 	char            * ptr;
-	int		        toWrite = iolen;
+	int		        toWrite = pageSize;
     int             thisWrite;
     int             retries=0;
     int             success=0;
@@ -539,7 +565,7 @@ int writeTo(int fh, int address, char * buf, int iolen) {
 
 	if (!(bp= (char *) malloc(pageSize+3))) {       // Biggest thing we can write is a page - plus an address
 		printf("Malloc failed !");
-		exit(1);
+		exit(2);
 	}
 
 //    printf("Write at address 0x%04x for 0x%04x bytes\n",address, iolen);
@@ -580,7 +606,7 @@ int writeTo(int fh, int address, char * buf, int iolen) {
 
         if (!success) {
             printf("\nHard write error - aborting\n");
-            exit (2);
+            exit (21);
         }
 
         thisWrite-=2;               // Remove the address offset from the buffer again
@@ -640,7 +666,7 @@ int	readFrom(int fh, int address, char * buf, int iolen) {
     }     
     if (!success) {
         printf("\nHard read error - aborting\n");
-        exit (1);
+        exit (22);
     }
     return (0);
 }
@@ -674,13 +700,14 @@ void usage() {
 	       "        0 - All zero's (0x00).\n"
 	       "        1 - All one's  (0xFF).\n"
 	       "        3 - Incremental pattern with +3 offset on each page (0x100)\n"
-	       "        5 - b01010101  (0x55).\n"
-	       "        a - b10101010  (0xAA).\n"
+	       "        c - Checkerboard\n"
+	       "        d - Inverse Checkerboard.\n"
 	       "  -d                Dump (read) device and hex dump to stdout.\n"
 	       "  -w                Write file contents into EEPROM.\n"
 	       "  -r                Read contents of EEPROM into file.\n"
 	       "  -v                Verify after operation (includes fill)\n"
 	       "  -n <file>         Filename to be used for operation.\n"
+	       "  -y                Yes, I'm sure. Enable Write operations\n"
 	       "\n\n"
 	       "Whilst processing, real-time output will be produced\n"
            "  . means progress without error (one dot per page)\n"

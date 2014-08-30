@@ -37,6 +37,7 @@
 .Op Fl w
 .Op Fl r 
 .Op Fl v
+.Op Fl y
 .Op Fl n Ar file
 .Sh DESCRIPTION
 .Nm i2ceeprom
@@ -50,7 +51,7 @@ Devices can be detected by probing the I2C bus using
 .Em i2cdetect
 or by looking at the circuit diagram and device data sheet
 .Pp
-It is possible to edit a device's contents by performing a read to a file, converting the file to ASCII format with
+With the use of other existing tools, it is possible to edit a device's contents by performing a read to a file, converting the file to ASCII format with
 .Em xxd
 editing the resulting file, then converting the ASCII file back to binary with
 .Em xxd -r
@@ -71,44 +72,47 @@ The I2C address of the target device (determine this from an
 .Pp
 The following optional command line options are supported
 .Bl -tag -offset indent -width indent
-.It Ar -h
+.It -h
 Display help information
-.It Ar -p page-size
+.It -p page-size
 Define the page size of the target device. Obtain this from the devices data sheet (look at the page write section). Using the correct page size may reduce wear on the EEPROM and will improve throughput. The default page size is 32 bytes. The maximum is 128 bytes.
 Setting a page size larger than the device supports will result in write failures or verify errors.
-.It Ar -s device-size
+.It -s device-size
 Define the size of the target device. Obtain this from the devices data sheet. Note that devices larger than 64K are often presented on multiple I2C addresses.
 .Pp
-As an example, the Microchip 24LC1025, which is a 128Kx8 device presents 64K on one the configured address and another 64K on address+4, i.e. 0x50 and 0x55, or 0x51 and 0x56
-.It Ar -r
+As an example, the Microchip 24LC1025, which is a 128Kx8 device presents 64K on one the configured address and another 64K on address+4, i.e. 0x50 and 0x55, or 0x51 and 0x56.
+.It -r
 Read the device and write its contents to the specified file. The use of this option implies that the filename
 .Em -n 
-must also be used
-.It Ar -w
+must also be used.
+.It -w
 Write the device conents using the contents of the specified file. The use of this option implies that the filename 
 .Em -n 
-must also be used
-.It Ar -v
+must also be used.
+.It -v
 Verify the memory buffer to the device contents,
 The filename (-n) argument must be specified for any read, write or verify operation, but it can be omitted for any patern based operation (where there is no file)
 
-.It Ar -n name
-The name of the file to be used in the read, write or verify operation. For write or verify operations, only the first device-size of the file is used. If the file is smaller than device-size, then the remainder of the EEPROM will be filled with 0x00
-.It Ar -p pattern
+.It -n name
+The name of the file to be used in the read, write or verify operation. For write or verify operations, only the first device-size of the file is used. If the file is smaller than device-size, then the remainder of the EEPROM will be filled with 0x00.
+.It -y 
+Yes, I'm sure. Enable writes - A safety net to reduce the risk of accidental overwrites. If this argument is not set, any write operation will be rejected.
+.It -p pattern
 The pattern to be programmed into the device, valid pattern codes are :
-.Pp
-0 - All Zero's (0x00)
-.Pp
-1 - All One's  (0xFF)
-.Pp
-3 - Incremental pattern with +3 offset on each 0x0100 boundary This is a good test for missing pages in a memory device, since each page has different contents. Works best with the -v (verify) option
-.Pp
-5 - Alternating zero, one pattern - b01010101  (0x55)
-.Pp
-a - Alternating one, zero pattern - b10101010  (0xaa)
-.Pp
-Performing all the above pattern writes with verify gives a quick check of the EEPROM, since all functionality is tested - read, write, I2C bus, mememory array.
-.It Ar -d
+.Bl -tag -offset indent -width indent
+.It 0
+All Zero's (0x00).
+.It 1
+All One's  (0xFF).
+.It 3
+Incremental pattern with +3 offset on each 0x0100 boundary This is a good test for missing pages in a memory device, since each page has different contents. Works best with the -v (verify) option.
+.It c
+Generate a checkerboard (Alternating zero, one pattern) across the device. This assumes that the internal device geometry is based around the page size. Each alternate page is also inverted.
+.It d
+Generate an inverse checkerboard (Alternating one, zero pattern). Identical to the checkerboard, but each array cell is inverted.
+.El
+Performing all the above pattern writes with verify gives a quick check of the EEPROM, since all functionality is tested - read, write, I2C bus, memory array.
+.It -d
 Hex Dump the devices contents to stdout. This removes the need to read the device to a file, then hexdump it separately, it does not however have some of the more advanced features of hexdump such as consolidating identical lines.
 .El
 
@@ -122,13 +126,13 @@ There are a couple of limitations, that exist due to technology of the EEPROM's 
 .Pp
 3. Due to (2), this in turn means that different image files must be used as no offset read / write capabilities to read part of an image have been coded, since this would increase the risk of command line errors corrupting the image file or EEPROM. This is trivial to overcome by the use of 
 .Xr dd 1
-with the block size (bs) seek (output) and skip (input) options
+with the block size (bs) seek (output) and skip (input) options.
 .Pp
 4. If this application is used on an I2C bus with other I2C master devices, then they may be using the bus whilst we are performing transfers, depending on how busy the bus is, this may result in transient read / write errors. The application will retry if errors occur. The impact on other masters on the bus due to the bus being busier may vary depending on how resilient they are - ie other i2c applications may fail whilst using this tool. 
 .Pp
 Similarly, if another master is trying to talk to the same device we are, then incorrect memory addresses may be accessed. This tool always sends the desired address imediately before performing a read / write. As above, the impact on other master devices due to this functionality is unknown.
 
-Whenever possible, it is prefereable to temporarily stop other I2C masters to reduce the above risks
+Whenever possible, it is prefereable to temporarily stop other I2C masters to reduce the above risks.
 
 .Sh WARNING
 This program will talk to I2C devices and may write to EEPROM or other devices that use the same protocol, hence it can cause data loss if not used correctly.
@@ -157,18 +161,42 @@ to find the busses in your system
 .Pp
 Read the 8K EEPROM at address 0x50 on I2C bus 1, its contents will be placed in image.bin
 .Pp
-.Em i2ceeprom 1 0x50 -s 8 -w -n image.bin -v
+.Em i2ceeprom 1 0x50 -s 8 -y -w -n image.bin -v
 .Pp
 Write the 8K EEPROM at address 0x50 on I2C bus 1,
 Read the file called image.bin (first 8K only). Verify the device contents after writing.
 .Pp
-.Em i2ceeprom 1 0x50 -s 64 -p 128 -f 0 -v
+.Em i2ceeprom 1 0x50 -s 64 -p 128 -y -f 0 -v
 .Pp
 Fill (write) the 64K EEPROM at address 0x50 on I2C bus 1 with all Zero's, verify the device contents after writing
 .Pp
 .Em i2ceeprom 1 0x50 -s 32 -p 128 -d    
 .Pp
 Read the 32K EEPROM and dump its contents out to stdout in hexdump format. You can achieve the same result with a read to a file and a hexdump of the file.
+
+.Sh EXIT CODES
+.Em i2ceeprom 
+produces the following exit codes
+.Bl -tag -offset indent -width indent
+.It 0
+All operations completed successfully
+.It 1
+The arguments passed to the application are invalid
+.It 2
+Memory allocation error
+.It 10
+Failed to write to the named file
+.It 11
+Failed to read from the named file 
+.It 20 
+I2C or EEPROM related IO error - i.e. wrong bus, wrong address, etc.
+.It 21
+EEPROM Write Error
+.It 22
+EEPROM Read Error
+.It 23
+EEPROM Verify failure
+.EL
 
 .Sh DIAGNOSTICS
 .Bd 
@@ -180,7 +208,10 @@ on the i2c bus and ensure that the device is not shown as UU, which indicates th
 There can be problems on shared I2C busses where the device, or other devices are being manipulated.
 .Em i2ceeprom
 attempts to work around such issues but cannot guarantee to get bus time on busy I2C busses. Smaller page sizes result in smaller I2C data transfers and may therefore help, but at the expense of slower operation.
-
+.Pp
+During and operation, the utility will generate a single . character to indicate each page that has been processed, similarly if any error occurs during bus or device activities, a single E will be produced for each error. This allows for the progress and any retries to be seen on screen in real-time.
+.Pp
+In order to use th I2C bus, your user account will need sufficient privileges, your accout may need to be added to the i2c group.
 .Sh SEE ALSO
 .Xr i2cdetect 8 ,
 .Xr i2cset 8 ,
@@ -203,7 +234,7 @@ I have released this in the hope that it is useful to someone else, after all I 
 
 .Sh AUTHORS
 .Nm i2ceeprom
-was written by Tim Chilton <tchilton@users.noreply.github.com>.
+was written by Tim Chilton.
 .Sh BUGS
 As far as I know, there are none, but please report any you find via.
 .Dl "https://github.com/tchilton/i2ceeprom/issues" 
