@@ -21,9 +21,9 @@ Linux I2C EEPROM manipulation - read, write, fill, verify and test I2C EEPROM de
 
 Installation instructions
 
-Download the source
-Review the code if you wish
-make
-make install
-man i2ceeprom
+1. Download the source
+2. Review the code if you wish
+3. make
+4. make install
+5. man i2ceeprom
 
