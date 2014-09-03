@@ -51,11 +51,15 @@ Devices can be detected by probing the I2C bus using
 .Em i2cdetect
 or by looking at the circuit diagram and device data sheet
 .Pp
-With the use of other existing tools, it is possible to edit a device's contents by performing a read to a file, converting the file to ASCII format with
+With the use of other standard linux tools, it is possible to edit a device's contents by performing a read to a file, converting the file to ASCII format with
 .Em xxd
-editing the resulting file, then converting the ASCII file back to binary with
+editing the resulting text file, then converting the ASCII file back to binary with
 .Em xxd -r
-then writing that file back using 
+.Pp
+Alternately, you could use an open source hex editor tool such as wxHexEdit
+.Em http://sourceforge.net/projects/wxhexeditor
+.Pp
+Whichever way you choose to do things, you can then write the resulting file back using 
 .Em i2ceeprom
 
 .Sh OPTIONS

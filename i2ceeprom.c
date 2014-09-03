@@ -16,7 +16,7 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 // Version 0.1 29/08/2014 Initial release
-// Version 0.1 30/08/2014 Improved patterns, removed global variables, added write enable flag
+// Version 0.2 30/08/2014 Improved patterns, removed global variables, added write enable flag
 
 // Note that on a shared I2C bus, other controllers may be addressing the 
 // same device, so always reset the address pointers before any data 
@@ -40,8 +40,8 @@
 // Function prototypes
 int     pollReady(int fh);
 int     writeTo(int fh, int address, char * buf, int pageSize);
-int		readFrom(int fh, int address, char * buf, int iolen);
-int		gotoAddress(int fh, int address);
+int     readFrom(int fh, int address, char * buf, int iolen);
+int     gotoAddress(int fh, int address);
 void    usage(void);
 int     checkValid(int size);
 int     myatoi(const char *str);
@@ -70,7 +70,7 @@ int main(int argc, char * argv[]) {
     int	    memSize;              	// Size of the device in bytes
     int     check;  
     int     i;
-	int     fhand;					// Filename of the I2C device
+    int     fhand;					// Filename of the I2C device
     int     doFill      = 0;        // True if we are filling memory
     int     doRead      = 0;        // True if we are reading the device
     int     doWrite     = 0;        // True if we are writing the memory 
